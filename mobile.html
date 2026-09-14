@@ -21561,7 +21561,7 @@ window.xyranthPhase196BNpcValueVerification=function(){
  addEventListener('resize',()=>{last='';schedule();});schedule();
 })();
 </script>
-<!-- Mobile Touch Edition 1.0: additive touch input and phone presentation only. -->
+<!-- Mobile Touch Edition 1.1: real-device touch-event repair and phone presentation only. -->
 <style id="xyrMobileEditionStyle">
   #xyrMobileEditionBadge,
   #xyrMobileControls,
@@ -21724,29 +21724,84 @@ window.xyranthPhase196BNpcValueVerification=function(){
       else if(inPlay())interactNPC();
     }
   }
-  function pressStart(button,e){
-    e.preventDefault();e.stopPropagation();
+  function stopInputEvent(e){
+    try{e.preventDefault()}catch(_e){}
+    try{e.stopPropagation()}catch(_e){}
+  }
+  function safePointerCapture(button,pointerId){
+    try{if(button.setPointerCapture&&pointerId!==undefined)button.setPointerCapture(pointerId)}catch(_e){}
+  }
+  function pressStart(button,e,inputId){
+    stopInputEvent(e);
     if(typeof ensureAudio==='function')ensureAudio();
     const action=button.dataset.touchHold;
     if(!action||!inPlay()||paused)return;
-    button.setPointerCapture?.(e.pointerId);held[action].add(e.pointerId);button.classList.add('is-pressed');
+    held[action].add(inputId);button.classList.add('is-pressed');
     applyHold(action,true);vibrate();
   }
-  function pressEnd(button,e){
-    e.preventDefault();e.stopPropagation();
+  function pressEnd(button,e,inputId){
+    stopInputEvent(e);
     const action=button.dataset.touchHold;if(!action)return;
-    held[action].delete(e.pointerId);
+    held[action].delete(inputId);
     if(!held[action].size){button.classList.remove('is-pressed');applyHold(action,false)}
   }
+  function changedTouches(e,callback){
+    const list=e.changedTouches||[];
+    for(let i=0;i<list.length;i++)callback('touch-'+list[i].identifier);
+  }
+  function bindTouchHold(button){
+    button.addEventListener('touchstart',e=>{
+      stopInputEvent(e);changedTouches(e,id=>pressStart(button,e,id));
+    },{passive:false});
+    const finish=e=>{
+      stopInputEvent(e);changedTouches(e,id=>pressEnd(button,e,id));
+    };
+    button.addEventListener('touchend',finish,{passive:false});
+    button.addEventListener('touchcancel',finish,{passive:false});
+  }
+  function bindTouchTap(button){
+    const activeTouches=new Set();
+    button.addEventListener('touchstart',e=>{
+      stopInputEvent(e);changedTouches(e,id=>activeTouches.add(id));
+      button.classList.add('is-pressed');vibrate();
+    },{passive:false});
+    button.addEventListener('touchend',e=>{
+      stopInputEvent(e);let activate=false;
+      changedTouches(e,id=>{if(activeTouches.delete(id))activate=true});
+      if(!activeTouches.size)button.classList.remove('is-pressed');
+      if(activate)tapAction(button.dataset.touchTap);
+    },{passive:false});
+    button.addEventListener('touchcancel',e=>{
+      stopInputEvent(e);changedTouches(e,id=>activeTouches.delete(id));
+      if(!activeTouches.size)button.classList.remove('is-pressed');
+    },{passive:false});
+  }
   controls.querySelectorAll('[data-touch-hold]').forEach(button=>{
-    button.addEventListener('pointerdown',e=>pressStart(button,e));
-    ['pointerup','pointercancel','lostpointercapture'].forEach(type=>button.addEventListener(type,e=>pressEnd(button,e)));
+    bindTouchHold(button);
+    button.addEventListener('pointerdown',e=>{
+      if(e.pointerType==='touch')return;
+      safePointerCapture(button,e.pointerId);pressStart(button,e,'pointer-'+e.pointerId);
+    });
+    ['pointerup','pointercancel','lostpointercapture'].forEach(type=>button.addEventListener(type,e=>{
+      if(e.pointerType==='touch')return;
+      pressEnd(button,e,'pointer-'+e.pointerId);
+    }));
     button.addEventListener('contextmenu',e=>e.preventDefault());
   });
   controls.querySelectorAll('[data-touch-tap]').forEach(button=>{
-    button.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();button.setPointerCapture?.(e.pointerId);button.classList.add('is-pressed');vibrate()});
-    button.addEventListener('pointerup',e=>{e.preventDefault();e.stopPropagation();button.classList.remove('is-pressed');tapAction(button.dataset.touchTap)});
-    ['pointercancel','lostpointercapture'].forEach(type=>button.addEventListener(type,()=>button.classList.remove('is-pressed')));
+    bindTouchTap(button);
+    button.addEventListener('pointerdown',e=>{
+      if(e.pointerType==='touch')return;
+      stopInputEvent(e);safePointerCapture(button,e.pointerId);button.classList.add('is-pressed');vibrate();
+    });
+    button.addEventListener('pointerup',e=>{
+      if(e.pointerType==='touch')return;
+      stopInputEvent(e);button.classList.remove('is-pressed');tapAction(button.dataset.touchTap);
+    });
+    ['pointercancel','lostpointercapture'].forEach(type=>button.addEventListener(type,e=>{
+      if(e.pointerType==='touch')return;
+      button.classList.remove('is-pressed');
+    }));
     button.addEventListener('contextmenu',e=>e.preventDefault());
   });
   controls.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
@@ -21780,10 +21835,11 @@ window.xyranthPhase196BNpcValueVerification=function(){
   addTouchHelp();
 
   window.xyranthMobileEditionVerification=()=>({
-    edition:'Mobile Touch Phase 1.0',touchEnvironment:touchLike(),controls:controls.querySelectorAll('button').length,
+    edition:'Mobile Touch Phase 1.1',touchEnvironment:touchLike(),controls:controls.querySelectorAll('button').length,
     holdControls:[...controls.querySelectorAll('[data-touch-hold]')].map(b=>b.dataset.touchHold),
     tapControls:[...controls.querySelectorAll('[data-touch-tap]')].map(b=>b.dataset.touchTap),
     desktopGameplayChanged:false,saveKeysPreserved:typeof saveKey==='string'&&saveKey==='xyranthSaveDG2',
+    explicitTouchEvents:true,pointerCaptureGuarded:true,
     mobileReady:document.body.classList.contains('xyrMobileReady'),valid:controls.querySelectorAll('button').length===10
   });
 })();
