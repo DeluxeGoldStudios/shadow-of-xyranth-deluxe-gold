@@ -21561,7 +21561,7 @@ window.xyranthPhase196BNpcValueVerification=function(){
  addEventListener('resize',()=>{last='';schedule();});schedule();
 })();
 </script>
-<!-- Mobile Touch Edition 1.1: real-device touch-event repair and phone presentation only. -->
+<!-- Mobile Touch Edition 1.2: document-capture hit-testing repair and phone presentation only. -->
 <style id="xyrMobileEditionStyle">
   #xyrMobileEditionBadge,
   #xyrMobileControls,
@@ -21579,7 +21579,7 @@ window.xyranthPhase196BNpcValueVerification=function(){
     position:fixed;inset:0;z-index:40;pointer-events:none;
     touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent
   }
-  .xyrMobileCluster{position:absolute;display:flex;pointer-events:none}
+  .xyrMobileCluster{position:absolute;display:flex;pointer-events:auto}
   .xyrMobileMove{
     left:max(10px,env(safe-area-inset-left));bottom:max(10px,env(safe-area-inset-bottom));
     gap:clamp(8px,1.8vw,15px);align-items:flex-end
@@ -21691,6 +21691,10 @@ window.xyranthPhase196BNpcValueVerification=function(){
   const controls=document.getElementById('xyrMobileControls');
   const touchLike=()=>matchMedia('(hover:none) and (pointer:coarse)').matches||navigator.maxTouchPoints>0;
   const held={left:new Set(),right:new Set(),jump:new Set(),fire:new Set()};
+  const activeInputs=new Map();
+  const touchButtons=[...controls.querySelectorAll('.xyrTouchButton')];
+  const usePointerEvents=typeof window.PointerEvent==='function';
+  let capturedStarts=0;
 
   function inPlay(){return typeof state!=='undefined'&&state==='play'&&!document.querySelector('.screen.active')}
   function vibrate(ms=9){try{if(navigator.vibrate)navigator.vibrate(ms)}catch(e){}}
@@ -21702,6 +21706,7 @@ window.xyranthPhase196BNpcValueVerification=function(){
     else if(action==='fire'){keyboardFireDown=pressed}
   }
   function releaseAll(){
+    activeInputs.clear();
     Object.keys(held).forEach(action=>{held[action].clear();applyHold(action,false)});
     controls.querySelectorAll('.is-pressed').forEach(el=>el.classList.remove('is-pressed'));
   }
@@ -21735,9 +21740,12 @@ window.xyranthPhase196BNpcValueVerification=function(){
     stopInputEvent(e);
     if(typeof ensureAudio==='function')ensureAudio();
     const action=button.dataset.touchHold;
-    if(!action||!inPlay()||paused)return;
+    if(!action||!inPlay())return false;
+    followHero();
+    if(paused)return false;
     held[action].add(inputId);button.classList.add('is-pressed');
     applyHold(action,true);vibrate();
+    return true;
   }
   function pressEnd(button,e,inputId){
     stopInputEvent(e);
@@ -21745,66 +21753,68 @@ window.xyranthPhase196BNpcValueVerification=function(){
     held[action].delete(inputId);
     if(!held[action].size){button.classList.remove('is-pressed');applyHold(action,false)}
   }
-  function changedTouches(e,callback){
-    const list=e.changedTouches||[];
-    for(let i=0;i<list.length;i++)callback('touch-'+list[i].identifier);
+  function controlAtPoint(x,y,target){
+    const direct=target&&target.closest?target.closest('.xyrTouchButton'):null;
+    if(direct&&controls.contains(direct))return direct;
+    for(let i=touchButtons.length-1;i>=0;i--){
+      const button=touchButtons[i],r=button.getBoundingClientRect();
+      if(r.width>0&&r.height>0&&x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom)return button;
+    }
+    return null;
   }
-  function bindTouchHold(button){
-    button.addEventListener('touchstart',e=>{
-      stopInputEvent(e);changedTouches(e,id=>pressStart(button,e,id));
-    },{passive:false});
-    const finish=e=>{
-      stopInputEvent(e);changedTouches(e,id=>pressEnd(button,e,id));
-    };
-    button.addEventListener('touchend',finish,{passive:false});
-    button.addEventListener('touchcancel',finish,{passive:false});
-  }
-  function bindTouchTap(button){
-    const activeTouches=new Set();
-    button.addEventListener('touchstart',e=>{
-      stopInputEvent(e);changedTouches(e,id=>activeTouches.add(id));
+  function startCapturedInput(button,e,inputId){
+    if(!button||activeInputs.has(inputId))return false;
+    if(button.dataset.touchHold){
+      if(!pressStart(button,e,inputId))return false;
+      activeInputs.set(inputId,{button,kind:'hold'});
+    }else if(button.dataset.touchTap){
+      stopInputEvent(e);activeInputs.set(inputId,{button,kind:'tap'});
       button.classList.add('is-pressed');vibrate();
-    },{passive:false});
-    button.addEventListener('touchend',e=>{
-      stopInputEvent(e);let activate=false;
-      changedTouches(e,id=>{if(activeTouches.delete(id))activate=true});
-      if(!activeTouches.size)button.classList.remove('is-pressed');
-      if(activate)tapAction(button.dataset.touchTap);
-    },{passive:false});
-    button.addEventListener('touchcancel',e=>{
-      stopInputEvent(e);changedTouches(e,id=>activeTouches.delete(id));
-      if(!activeTouches.size)button.classList.remove('is-pressed');
-    },{passive:false});
+    }else return false;
+    capturedStarts++;
+    return true;
   }
-  controls.querySelectorAll('[data-touch-hold]').forEach(button=>{
-    bindTouchHold(button);
-    button.addEventListener('pointerdown',e=>{
-      if(e.pointerType==='touch')return;
-      safePointerCapture(button,e.pointerId);pressStart(button,e,'pointer-'+e.pointerId);
-    });
-    ['pointerup','pointercancel','lostpointercapture'].forEach(type=>button.addEventListener(type,e=>{
-      if(e.pointerType==='touch')return;
-      pressEnd(button,e,'pointer-'+e.pointerId);
-    }));
-    button.addEventListener('contextmenu',e=>e.preventDefault());
-  });
-  controls.querySelectorAll('[data-touch-tap]').forEach(button=>{
-    bindTouchTap(button);
-    button.addEventListener('pointerdown',e=>{
-      if(e.pointerType==='touch')return;
-      stopInputEvent(e);safePointerCapture(button,e.pointerId);button.classList.add('is-pressed');vibrate();
-    });
-    button.addEventListener('pointerup',e=>{
-      if(e.pointerType==='touch')return;
-      stopInputEvent(e);button.classList.remove('is-pressed');tapAction(button.dataset.touchTap);
-    });
-    ['pointercancel','lostpointercapture'].forEach(type=>button.addEventListener(type,e=>{
-      if(e.pointerType==='touch')return;
-      button.classList.remove('is-pressed');
-    }));
-    button.addEventListener('contextmenu',e=>e.preventDefault());
-  });
-  controls.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
+  function finishCapturedInput(e,inputId,activate){
+    const route=activeInputs.get(inputId);if(!route)return false;
+    activeInputs.delete(inputId);stopInputEvent(e);
+    if(route.kind==='hold')pressEnd(route.button,e,inputId);
+    else{
+      const stillPressed=[...activeInputs.values()].some(v=>v.button===route.button);
+      if(!stillPressed)route.button.classList.remove('is-pressed');
+      if(activate)tapAction(route.button.dataset.touchTap);
+    }
+    return true;
+  }
+  function bindPointerCaptureBridge(){
+    document.addEventListener('pointerdown',e=>{
+      const button=controlAtPoint(e.clientX,e.clientY,e.target);if(!button)return;
+      stopInputEvent(e);safePointerCapture(button,e.pointerId);
+      startCapturedInput(button,e,'pointer-'+e.pointerId);
+    },{capture:true,passive:false});
+    document.addEventListener('pointerup',e=>finishCapturedInput(e,'pointer-'+e.pointerId,true),{capture:true,passive:false});
+    document.addEventListener('pointercancel',e=>finishCapturedInput(e,'pointer-'+e.pointerId,false),{capture:true,passive:false});
+  }
+  function bindTouchCaptureBridge(){
+    document.addEventListener('touchstart',e=>{
+      let handled=false;const list=e.changedTouches||[];
+      for(let i=0;i<list.length;i++){
+        const t=list[i],button=controlAtPoint(t.clientX,t.clientY,e.target);
+        if(startCapturedInput(button,e,'touch-'+t.identifier))handled=true;
+      }
+      if(handled)stopInputEvent(e);
+    },{capture:true,passive:false});
+    const finish=(e,activate)=>{
+      let handled=false;const list=e.changedTouches||[];
+      for(let i=0;i<list.length;i++)if(finishCapturedInput(e,'touch-'+list[i].identifier,activate))handled=true;
+      if(handled)stopInputEvent(e);
+    };
+    document.addEventListener('touchend',e=>finish(e,true),{capture:true,passive:false});
+    document.addEventListener('touchcancel',e=>finish(e,false),{capture:true,passive:false});
+  }
+  if(usePointerEvents)bindPointerCaptureBridge();else bindTouchCaptureBridge();
+  touchButtons.forEach(button=>button.addEventListener('contextmenu',e=>e.preventDefault()));
+  controls.addEventListener('pointermove',e=>{if(activeInputs.size)e.preventDefault()},{passive:false});
+  controls.addEventListener('touchmove',e=>{if(activeInputs.size)e.preventDefault()},{passive:false});
   controls.addEventListener('click',e=>{e.preventDefault();e.stopPropagation()},true);
   addEventListener('blur',releaseAll);
   addEventListener('orientationchange',releaseAll);
@@ -21835,11 +21845,11 @@ window.xyranthPhase196BNpcValueVerification=function(){
   addTouchHelp();
 
   window.xyranthMobileEditionVerification=()=>({
-    edition:'Mobile Touch Phase 1.1',touchEnvironment:touchLike(),controls:controls.querySelectorAll('button').length,
+    edition:'Mobile Touch Phase 1.2',touchEnvironment:touchLike(),controls:controls.querySelectorAll('button').length,
     holdControls:[...controls.querySelectorAll('[data-touch-hold]')].map(b=>b.dataset.touchHold),
     tapControls:[...controls.querySelectorAll('[data-touch-tap]')].map(b=>b.dataset.touchTap),
     desktopGameplayChanged:false,saveKeysPreserved:typeof saveKey==='string'&&saveKey==='xyranthSaveDG2',
-    explicitTouchEvents:true,pointerCaptureGuarded:true,
+    captureBridge:true,coordinateHitTesting:true,eventModel:usePointerEvents?'pointer':'touch',capturedStarts,
     mobileReady:document.body.classList.contains('xyrMobileReady'),valid:controls.querySelectorAll('button').length===10
   });
 })();
